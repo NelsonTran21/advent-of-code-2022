@@ -2,6 +2,6 @@ mod day01;
 
 fn main() {
    println!("=== Day 1 ===");
-   println!("Part 1: {:?}", day01::solve_part1());
-   println!("Part 2: {:?}", day01::solve_part2());
+   println!("Part 1: {:?}", day01::solve_part_one());
+   println!("Part 2: {:?}", day01::solve_part_two());
 }

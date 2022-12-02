@@ -12,12 +12,12 @@ fn parse_input() -> Vec<Calories> {
       .collect()
 }
 
-pub fn solve_part1() -> Calories {
+pub fn solve_part_one() -> Calories {
    let food_bags = parse_input();
    food_bags.into_iter().max().expect("no food bags")
 }
 
-pub fn solve_part2() -> Calories {
+pub fn solve_part_two() -> Calories {
    let mut food_bags = parse_input();
    food_bags.sort_by(|a, b| b.cmp(a));
    food_bags.into_iter().take(3).sum()
