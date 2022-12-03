@@ -36,6 +36,10 @@ fn find_matching_item(rucksack: Rucksack) -> HashSet<Item> {
 }
 
 fn find_group_badge(rucksacks: &[Rucksack]) -> HashSet<Item> {
+   if rucksacks.is_empty() || rucksacks.len() == 1 {
+      return HashSet::new();
+   }
+
    rucksacks
       .iter()
       .skip(1)
