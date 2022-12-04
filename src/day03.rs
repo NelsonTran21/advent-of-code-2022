@@ -31,11 +31,11 @@ fn get_priority(item: Item) -> Priority {
    }
 }
 
-fn find_matching_item(rucksack: Rucksack) -> HashSet<Item> {
+fn find_common_items(rucksack: Rucksack) -> HashSet<Item> {
    rucksack.0.intersection(&rucksack.1).copied().collect()
 }
 
-fn find_group_badge(rucksacks: &[Rucksack]) -> HashSet<Item> {
+fn find_group_badges(rucksacks: &[Rucksack]) -> HashSet<Item> {
    if rucksacks.is_empty() || rucksacks.len() == 1 {
       return HashSet::new();
    }
@@ -51,12 +51,8 @@ fn find_group_badge(rucksacks: &[Rucksack]) -> HashSet<Item> {
 pub fn solve_part_one() -> Priority {
    parse_input()
       .into_iter()
-      .map(|rucksack| -> Priority {
-         find_matching_item(rucksack)
-            .into_iter()
-            .map(get_priority)
-            .sum()
-      })
+      .flat_map(|rucksack| find_common_items(rucksack))
+      .map(get_priority)
       .sum()
 }
 
@@ -64,11 +60,7 @@ pub fn solve_part_two() -> Priority {
    parse_input()
       .chunks(3)
       .into_iter()
-      .map(|rucksacks| -> Priority {
-         find_group_badge(rucksacks)
-            .into_iter()
-            .map(get_priority)
-            .sum()
-      })
+      .flat_map(|rucksacks| find_group_badges(rucksacks))
+      .map(get_priority)
       .sum()
 }
