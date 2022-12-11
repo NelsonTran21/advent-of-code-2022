@@ -3,87 +3,41 @@ use std::{cell::RefCell, fmt::Display, rc::Rc};
 use regex::Regex;
 
 use ChangeDirectory::*;
-use Inode::*;
+use InodeKind::*;
 
-#[derive(Debug, Clone)]
-enum Inode<'a> {
-   File {
-      parent: Option<Rc<RefCell<Inode<'a>>>>,
-      path: Option<String>,
-      name: String,
-      size: usize,
-   },
+#[derive(Clone)]
+struct Inode<'a> {
+   kind: InodeKind<'a>,
+   parent: Option<Rc<RefCell<Inode<'a>>>>,
+   path: Option<String>,
+   name: String,
+   // Invariant: Because the directory size is a computed property, this
+   // property should be updated in file creation and deletion operations
+   // occurring within this directory in order to prevent drift.
+   size: usize,
+}
+
+#[derive(Clone)]
+enum InodeKind<'a> {
+   File,
    Directory {
-      parent: Option<Rc<RefCell<Inode<'a>>>>,
       children: Vec<Rc<RefCell<Inode<'a>>>>,
-      path: Option<String>,
-      name: String,
-      // Invariant: Because the directory size is a computed property, this
-      // property should be updated in file creation and deletion operations
-      // occurring within this directory in order to prevent drift.
-      size: usize,
    },
 }
 
 impl<'a> Inode<'a> {
-   fn set_parent(&mut self, new_parent: Option<Rc<RefCell<Inode<'a>>>>) {
-      match self {
-         File { ref mut parent, .. } => *parent = new_parent,
-         Directory { ref mut parent, .. } => *parent = new_parent,
-      }
-   }
-
-   fn get_parent(&self) -> Option<Rc<RefCell<Inode<'a>>>> {
-      match self {
-         File { parent, .. } => parent.clone(),
-         Directory { parent, .. } => parent.clone(),
-      }
-   }
-
    fn get_children(&self) -> Vec<Rc<RefCell<Inode<'a>>>> {
-      match self {
+      match self.kind {
          File { .. } => vec![],
-         Directory { children, .. } => children.clone(),
-      }
-   }
-
-   fn set_path(&mut self, new_path: Option<String>) {
-      match self {
-         File { ref mut path, .. } => *path = new_path,
-         Directory { ref mut path, .. } => *path = new_path,
-      }
-   }
-
-   fn get_name(&self) -> String {
-      match self {
-         File { name, .. } => name.clone(),
-         Directory { name, .. } => name.clone(),
-      }
-   }
-
-   fn set_size(&mut self, new_size: usize) {
-      match *self {
-         File { ref mut size, .. } => *size = new_size,
-         Directory { ref mut size, .. } => *size = new_size,
-      }
-   }
-
-   fn get_size(&self) -> usize {
-      match *self {
-         File { size, .. } => size,
-         Directory { size, .. } => size,
-      }
-   }
-
-   fn is_file(&self) -> bool {
-      match self {
-         File { .. } => true,
-         Directory { .. } => false,
+         Directory { ref children, .. } => children.clone(),
       }
    }
 
    fn is_directory(&self) -> bool {
-      !self.is_file()
+      match self.kind {
+         File { .. } => false,
+         Directory { .. } => true,
+      }
    }
 
    fn iter(&self) -> InodeIter<'a> {
@@ -98,26 +52,19 @@ impl<'a> Inode<'a> {
 
 impl<'a> Display for Inode<'a> {
    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-      match self {
-         File { name, size, .. } => writeln!(f, "file: {} ({})", name, size)?,
+      writeln!(f, "file: {} ({})", self.name, self.size)?;
 
-         Directory {
-            path,
-            size,
-            children,
-            ..
-         } => {
-            writeln!(
-               f,
-               "dir: {} ({})",
-               path.clone().unwrap_or("?".to_owned()),
-               size
-            )?;
+      if let Directory { ref children } = self.kind {
+         writeln!(
+            f,
+            "dir: {} ({})",
+            self.path.clone().unwrap_or("?".to_owned()),
+            self.size
+         )?;
 
-            for c in children {
-               let c = c.borrow();
-               write!(f, "{}", *c)?;
-            }
+         for c in children {
+            let c = c.borrow();
+            write!(f, "{}", *c)?;
          }
       }
 
@@ -154,7 +101,7 @@ impl<'a> Iterator for InodeIter<'a> {
          },
          Some(inode) => {
             let item = self.children.remove(0);
-            match *inode.clone().borrow() {
+            match inode.clone().borrow().kind {
                File { .. } => Some(item),
                Directory { .. } => {
                   let current = self.clone();
@@ -168,7 +115,7 @@ impl<'a> Iterator for InodeIter<'a> {
    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct FileSystem<'a> {
    tree: Rc<RefCell<Inode<'a>>>,
 }
@@ -176,12 +123,12 @@ struct FileSystem<'a> {
 impl<'a> FileSystem<'a> {
    fn new() -> Self {
       FileSystem {
-         tree: Rc::new(RefCell::new(Directory {
+         tree: Rc::new(RefCell::new(Inode {
+            kind: Directory { children: vec![] },
             parent: None,
             path: Some(String::from("/")),
             name: String::from("/"),
             size: 0,
-            children: vec![],
          })),
       }
    }
@@ -196,7 +143,7 @@ struct FileSystemCursor<'a> {
 impl<'a> FileSystemCursor<'a> {
    fn new(file_system: FileSystem<'a>) -> Self {
       FileSystemCursor {
-         cwd: file_system.tree.clone().borrow().get_name(),
+         cwd: file_system.tree.clone().borrow().name.clone(),
          file_system: file_system.tree.clone(),
          cursor: file_system.tree.clone(),
       }
@@ -213,73 +160,68 @@ impl<'a> FileSystemCursor<'a> {
             let cursor = self.cursor.clone();
             let current_directory = cursor.borrow();
 
-            if let Directory { ref children, .. } = *current_directory {
+            if let Directory { ref children, .. } = (*current_directory).kind {
                let subdirectory = children.iter().find(|file| {
                   let file = file.borrow();
-                  file.is_directory() && file.get_name() == file_name
+                  file.is_directory() && file.name == file_name
                });
 
                if let Some(subdirectory) = subdirectory {
                   self.cursor = subdirectory.clone();
-                  self.cwd = self.cwd.clone() + &subdirectory.borrow().get_name() + "/";
+                  self.cwd = self.cwd.clone() + &subdirectory.borrow().name + "/";
                }
             }
          }
 
          Out => {
-            let cursor = self.cursor.clone();
-            let current_directory = cursor.borrow();
+            match self.cursor.clone().borrow().parent.clone() {
+               Some(parent) => {
+                  self.cursor = parent.clone();
 
-            if let Directory { ref parent, .. } = *current_directory {
-               match parent {
-                  Some(parent) => {
-                     self.cursor = parent.clone();
+                  let parts: Vec<_> = self.cwd.split_terminator('/').collect();
+                  let parts_count = parts.len();
 
-                     let parts: Vec<_> = self.cwd.split_terminator('/').collect();
-                     let parts_count = parts.len();
-
-                     if parts_count == 0 {
-                        self.cwd = String::from("/");
-                     } else {
-                        self.cwd = parts
-                           .into_iter()
-                           .take(parts_count - 1)
-                           .collect::<Vec<_>>()
-                           .join("/")
-                           + "/";
-                     }
+                  if parts_count == 0 {
+                     self.cwd = String::from("/");
+                  } else {
+                     self.cwd = parts
+                        .into_iter()
+                        .take(parts_count - 1)
+                        .collect::<Vec<_>>()
+                        .join("/")
+                        + "/";
                   }
-
-                  // Cannot `cd ..` in root directory
-                  None => (),
                }
+
+               // Cannot `cd ..` in root directory
+               None => (),
             }
          }
       }
    }
 
    fn create_file(&mut self, file: Rc<RefCell<Inode<'a>>>) {
-      if let Directory {
+      if let Inode {
          ref mut parent,
          ref mut size,
-         ref mut children,
+         kind: Directory { ref mut children },
          ..
       } = *self.cursor.borrow_mut()
       {
          // Update directory size for parent directory.
-         *size += file.borrow().get_size();
+         *size += file.borrow().size;
          let mut iter_cursor = parent.clone();
          while let Some(inode) = iter_cursor {
             let mut inode = inode.borrow_mut();
-            let new_size = inode.get_size() + file.borrow().get_size();
-            inode.set_size(new_size);
-            iter_cursor = inode.get_parent().clone();
+            let new_size = inode.size + file.borrow().size;
+            inode.size = new_size;
+            iter_cursor = inode.parent.clone();
          }
 
          // Link the file to the filesystem tree.
-         let absolute_path = self.cwd.clone() + &file.borrow().get_name();
-         file.borrow_mut().set_path(Some(absolute_path));
-         file.borrow_mut().set_parent(Some(self.cursor.clone()));
+         let absolute_path = self.cwd.clone() + &file.borrow().name;
+         file.borrow_mut().path = Some(absolute_path);
+         file.borrow_mut().parent = Some(self.cursor.clone());
          children.push(file);
 
          return;
@@ -333,12 +275,12 @@ fn parse_inode(input: &'static str) -> Option<Inode> {
 
    let directory = Regex::new(r"dir (.*)").unwrap();
    if let Some(captures) = directory.captures(input) {
-      return captures.get(1).map(|directory_name| Directory {
+      return captures.get(1).map(|directory_name| Inode {
+         kind: Directory { children: vec![] },
          parent: None,
          path: None,
          name: directory_name.as_str().to_owned(),
          size: 0,
-         children: vec![],
       });
    }
 
@@ -346,7 +288,8 @@ fn parse_inode(input: &'static str) -> Option<Inode> {
    if let Some(captures) = file.captures(input) {
       return captures.get(1).and_then(|size| {
          captures.get(2).and_then(|file_name| {
-            Some(File {
+            Some(Inode {
+               kind: File,
                parent: None,
                path: None,
                name: file_name.as_str().to_owned(),
@@ -389,7 +332,7 @@ pub fn solve_part_one() -> usize {
       .borrow()
       .iter()
       .filter(|file| file.borrow().is_directory())
-      .map(|file| file.borrow().get_size())
+      .map(|file| file.borrow().size)
       .filter(|&size| size <= 100000)
       .sum()
 }
@@ -399,7 +342,7 @@ pub fn solve_part_two() -> usize {
    const TARGET_FREE_DISK_SPACE: usize = 30000000;
 
    let file_system = build_file_system();
-   let current_disk_space = file_system.tree.borrow().get_size();
+   let current_disk_space = file_system.tree.borrow().size;
    let disk_space_to_free = current_disk_space - (TOTAL_DISK_SPACE - TARGET_FREE_DISK_SPACE);
 
    let mut directory_sizes = build_file_system()
@@ -407,7 +350,7 @@ pub fn solve_part_two() -> usize {
       .borrow()
       .iter()
       .filter(|file| file.borrow().is_directory())
-      .map(|file| file.borrow().get_size())
+      .map(|file| file.borrow().size)
       .collect::<Vec<_>>();
 
    directory_sizes.sort();
