@@ -8,6 +8,7 @@ mod day05;
 mod day06;
 mod day07;
 mod day08;
+mod day09;
 
 fn main() {
    println!("=== Day 1 ===");
@@ -48,5 +49,10 @@ fn main() {
    println!("=== Day 8 ===");
    println!("Part 1: {:?}", day08::solve_part_one());
    println!("Part 2: {:?}", day08::solve_part_two());
+   println!();
+
+   println!("=== Day 9 ===");
+   println!("Part 1: {:?}", day09::solve_part_one());
+   println!("Part 2: {:?}", day09::solve_part_two());
    println!();
 }
